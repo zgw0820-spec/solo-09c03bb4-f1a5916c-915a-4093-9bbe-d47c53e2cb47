@@ -1,0 +1,50 @@
+services:
+  # 模拟打印机:收到 EOF 才确认接单;支持 @REJECT@ / @BLOCK@ 标记
+  printer:
+    build: .
+    image: label-gateway:latest
+    command: ["python", "-m", "app.printer"]
+    environment:
+      PRINTER_LISTEN_HOST: "0.0.0.0"
+      PRINTER_LISTEN_PORT: "9100"
+      PRINTER_GRACE_SECONDS: "2"
+    ports:
+      - "9100:9100"
+    # 纯 TCP 服务不配置 healthcheck:裸 TCP 探活会被网关/打印机当成
+    # 一个 0 字节标签作业。用启动顺序 + 网关连接超时兜底。
+
+  # asyncio 转发网关:半关闭透传、缓冲受限、写阻塞超时回收
+  gateway:
+    build: .
+    image: label-gateway:latest
+    command: ["python", "-m", "app.gateway"]
+    depends_on:
+      - printer
+    restart: on-failure
+    environment:
+      GATEWAY_LISTEN_HOST: "0.0.0.0"
+      GATEWAY_LISTEN_PORT: "9000"
+      PRINTER_HOST: "printer"
+      PRINTER_PORT: "9100"
+      FORWARD_BUFFER_BYTES: "65536"
+      WRITE_TIMEOUT_SECONDS: "3"
+      CONNECT_TIMEOUT_SECONDS: "5"
+    ports:
+      - "9000:9000"
+
+  # FastAPI + Swagger,发起真实 TCP 试传
+  api:
+    build: .
+    image: label-gateway:latest
+    command: ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      - gateway
+    restart: on-failure
+    environment:
+      API_GATEWAY_HOST: "gateway"
+      API_GATEWAY_PORT: "9000"
+      API_REQUEST_TIMEOUT: "20"
+      # 与网关保持一致,/health 仅用于展示生效配置
+      WRITE_TIMEOUT_SECONDS: "3"
+    ports:
+      - "8080:8080"
