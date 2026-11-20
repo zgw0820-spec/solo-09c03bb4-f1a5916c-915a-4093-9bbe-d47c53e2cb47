@@ -1,5 +1,6 @@
 .venv/
 .run_logs/
+.forensics/
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -14,6 +14,7 @@ services:
     # 一个 0 字节标签作业。用启动顺序 + 网关连接超时兜底。
 
   # asyncio 转发网关:半关闭透传、缓冲受限、写阻塞超时回收
+  # 另开取证端口(9001):同一时刻一笔取证试传,双方向原始字节落盘
   gateway:
     build: .
     image: label-gateway:latest
@@ -29,10 +30,21 @@ services:
       FORWARD_BUFFER_BYTES: "65536"
       WRITE_TIMEOUT_SECONDS: "3"
       CONNECT_TIMEOUT_SECONDS: "5"
+      # 取证:监听端口、共享落盘目录、缓存与记录总量上限、单笔看门狗
+      FORENSIC_LISTEN_HOST: "0.0.0.0"
+      FORENSIC_LISTEN_PORT: "9001"
+      FORENSIC_DATA_DIR: "/data/forensics"
+      FORENSIC_BUFFER_BYTES: "1048576"
+      FORENSIC_STORE_BYTES: "67108864"
+      FORENSIC_PENDING_TTL_SECONDS: "60"
+      FORENSIC_JOB_TIMEOUT_SECONDS: "30"
     ports:
       - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - forensics-data:/data/forensics
 
-  # FastAPI + Swagger,发起真实 TCP 试传
+  # FastAPI + Swagger,发起真实 TCP 试传;取证记录从共享卷读取并提供下载
   api:
     build: .
     image: label-gateway:latest
@@ -43,8 +55,19 @@ services:
     environment:
       API_GATEWAY_HOST: "gateway"
       API_GATEWAY_PORT: "9000"
+      API_FORENSIC_PORT: "9001"
       API_REQUEST_TIMEOUT: "20"
       # 与网关保持一致,/health 仅用于展示生效配置
       WRITE_TIMEOUT_SECONDS: "3"
+      # 与网关共享同一个取证目录(同一个卷)
+      FORENSIC_DATA_DIR: "/data/forensics"
+      FORENSIC_BUFFER_BYTES: "1048576"
+      FORENSIC_STORE_BYTES: "67108864"
     ports:
       - "8080:8080"
+    volumes:
+      - forensics-data:/data/forensics
+
+volumes:
+  # 网关写入取证记录、API 读取并提供下载的共享卷
+  forensics-data:
